@@ -9,6 +9,8 @@ discover: 0001_squashed_0003_discover_json_field
 
 explore: 0001_squashed_0009_add_trace_item_attribute_value_context
 
+feedback: 0007_cleanup_failed_safe_deletes
+
 flags: 0001_squashed_0004_add_flag_audit_log_provider_column
 
 hybridcloud: 0001_squashed_0030_remove_orgslugreservationreplica_delete
@@ -22,6 +24,8 @@ nodestore: 0001_squashed_0002_nodestore_no_dictfield
 notifications: 0001_squashed_0012_drop_metric_alert_cols_notificationmessage
 
 preprod: 0001_squashed_0030_add_images_errored_to_snapshot_comparison
+
+releases: 0004_cleanup_failed_safe_deletes
 
 replays: 0001_squashed_0007_organizationmember_replay_access
 
