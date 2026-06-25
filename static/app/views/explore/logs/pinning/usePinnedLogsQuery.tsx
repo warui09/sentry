@@ -1,20 +1,20 @@
-import {useEffect, useMemo} from 'react';
-import {skipToken, useQuery} from '@tanstack/react-query';
+import {useCallback, useEffect, useMemo} from 'react';
+import type {QueryClient, QueryFunctionContext} from '@tanstack/react-query';
+import {skipToken, useQueries, useQuery} from '@tanstack/react-query';
 
 import {normalizeDateTimeParams} from 'sentry/components/pageFilters/parse';
 import {usePageFilters} from 'sentry/components/pageFilters/usePageFilters';
-import {apiOptions, selectJsonWithHeaders} from 'sentry/utils/api/apiOptions';
+import {apiFetch} from 'sentry/utils/api/apiFetch';
+import {getApiUrl} from 'sentry/utils/api/getApiUrl';
 import {DiscoverDatasets} from 'sentry/utils/discover/types';
 import {useOrganization} from 'sentry/utils/useOrganization';
-import {
-  SAMPLING_MODE,
-  type SamplingMode,
-} from 'sentry/views/explore/hooks/useProgressiveQuery';
+import {SAMPLING_MODE} from 'sentry/views/explore/hooks/useProgressiveQuery';
 import {AlwaysPresentLogFields} from 'sentry/views/explore/logs/constants';
 import type {LogsPinning} from 'sentry/views/explore/logs/pinning/useLogsPinning';
 import {
   OurLogKnownFieldKey,
   type EventsLogsResult,
+  type OurLogsResponseItem,
 } from 'sentry/views/explore/logs/types';
 import type {LogTableRowItem} from 'sentry/views/explore/logs/utils';
 import {useQueryParamsFields} from 'sentry/views/explore/queryParams/context';
@@ -24,21 +24,45 @@ interface PinnedLogsOptions {
   logsPinning: LogsPinning | undefined;
 }
 
+const DRIVER_QUERY_KEY = 'pinned-logs-driver';
+
 /**
  * Practically-infinite period so the wide step finds any log still in retention,
  * regardless of the selected range. The backend clamps it to the org's retention.
  */
 const WIDE_STATS_PERIOD = '9999d';
 
-export function usePinnedLogsQuery({allRows, logsPinning}: PinnedLogsOptions) {
-  const {selection, isReady: pageFiltersReady} = usePageFilters();
-  const userFields = useQueryParamsFields();
+function pinnedLogRowQueryKey(id: string) {
+  return ['pinned-log-row', id] as const;
+}
 
-  const missingIds = useMemo(() => {
+export function usePinnedLogsQuery({allRows, logsPinning}: PinnedLogsOptions) {
+  const missingIds = useMissingPinnedLogIds(allRows, logsPinning);
+  const isFetching = usePinnedLogFetcher(missingIds, logsPinning);
+  const {rows, resolvedIds} = useCachedPinnedLogRows(missingIds);
+
+  return {
+    fetchedRows: rows,
+    isPending: isFetching && missingIds.some(id => !resolvedIds.has(id)),
+  };
+}
+
+/** Pinned ids that aren't already present in the loaded table rows. */
+function useMissingPinnedLogIds(
+  allRows: LogTableRowItem[],
+  logsPinning: LogsPinning | undefined
+) {
+  return useMemo(() => {
     const allRowIds = new Set(allRows.map(row => row[OurLogKnownFieldKey.ID]));
     const pinnedIds = logsPinning?.getPinnedRowIds() ?? [];
     return pinnedIds.filter(id => !allRowIds.has(id));
   }, [logsPinning, allRows]);
+}
+
+function usePinnedLogFetcher(missingIds: string[], logsPinning: LogsPinning | undefined) {
+  const organization = useOrganization();
+  const {selection, isReady: pageFiltersReady} = usePageFilters();
+  const userFields = useQueryParamsFields();
 
   const baseQuery = useMemo(
     () => ({
@@ -51,118 +75,143 @@ export function usePinnedLogsQuery({allRows, logsPinning}: PinnedLogsOptions) {
     }),
     [userFields, selection.projects, selection.environments]
   );
-
-  const canFetch = pageFiltersReady && !!logsPinning;
-
-  // Step 1: Search in the parent selected range for pins that are not loaded yet.
-  // Start with this smaller range so we don't have to scan the org's full retention period.
-  const inRangeQuery = useQuery({
-    ...usePinnedLogsEventsQueryOptions({
-      ids: missingIds,
-      dateParams: normalizeDateTimeParams(selection.datetime),
-      baseQuery,
-      canFetch,
-      staleTime: 0,
-    }),
-    select: selectJsonWithHeaders,
-  });
-
-  // Step 2: Any IDs not found in the parent selected range escalate to a wide window.
-  // Only populated if there are IDs still missing after the in-range query succeeds.
-  const stillMissingIds = useMemo(() => {
-    if (!inRangeQuery.isSuccess && !inRangeQuery.isError) {
-      return [];
-    }
-    const foundIds = new Set(
-      (inRangeQuery.data?.json.data ?? []).map(row => row[OurLogKnownFieldKey.ID])
-    );
-    return missingIds.filter(id => !foundIds.has(id));
-  }, [inRangeQuery.isSuccess, inRangeQuery.isError, inRangeQuery.data?.json, missingIds]);
-
-  const wideQuery = useQuery({
-    ...usePinnedLogsEventsQueryOptions({
-      ids: stillMissingIds,
-      dateParams: {statsPeriod: WIDE_STATS_PERIOD},
-      baseQuery,
-      canFetch,
-      staleTime: Infinity,
-    }),
-    select: selectJsonWithHeaders,
-  });
-
-  const {removePinnedRows} = logsPinning ?? {};
-
-  useEffect(() => {
-    if (
-      !removePinnedRows ||
-      !wideQuery.isSuccess ||
-      wideQuery.data.json.meta?.dataScanned === 'partial'
-    ) {
-      return;
-    }
-
-    const foundIds = new Set(
-      wideQuery.data.json.data.map(row => row[OurLogKnownFieldKey.ID])
-    );
-
-    const idsToRemove = stillMissingIds.filter(id => !foundIds.has(id));
-    if (idsToRemove.length > 0) {
-      removePinnedRows(idsToRemove);
-    }
-  }, [wideQuery.isSuccess, wideQuery.data, stillMissingIds, removePinnedRows]);
-
-  const fetchedRows = useMemo(
-    () => [...(inRangeQuery.data?.json.data ?? []), ...(wideQuery.data?.json.data ?? [])],
-    [inRangeQuery.data, wideQuery.data]
+  const inRangeDateParams = useMemo(
+    () => normalizeDateTimeParams(selection.datetime),
+    [selection.datetime]
   );
 
-  return {
-    fetchedRows,
-    isPending:
-      missingIds.length > 0 &&
-      (inRangeQuery.isPending || (stillMissingIds.length > 0 && wideQuery.isPending)),
-  };
+  const driver = useQuery({
+    queryKey: [
+      DRIVER_QUERY_KEY,
+      {
+        organizationSlug: organization.slug,
+        ids: [...missingIds].sort(),
+        baseQuery,
+        dateParams: inRangeDateParams,
+      },
+    ],
+    enabled: pageFiltersReady && !!logsPinning && missingIds.length > 0,
+    staleTime: 0,
+    queryFn: context =>
+      fetchAndCachePinnedLogs(context, {
+        ids: missingIds,
+        organizationSlug: organization.slug,
+        baseQuery,
+        inRangeDateParams,
+      }),
+  });
+
+  const notFoundIds = driver.data;
+  const removePinnedRows = logsPinning?.removePinnedRows;
+  useEffect(() => {
+    if (removePinnedRows && notFoundIds?.length) {
+      removePinnedRows(notFoundIds);
+    }
+  }, [notFoundIds, removePinnedRows]);
+
+  return driver.fetchStatus === 'fetching';
 }
 
-type PinnedLogsBaseQuery = {
-  dataset: DiscoverDatasets;
-  environment: string[];
-  field: string[];
-  project: number[];
-  referrer: string;
-  sampling: SamplingMode;
-};
-
-function usePinnedLogsEventsQueryOptions({
-  ids,
-  dateParams,
-  baseQuery,
-  canFetch,
-  staleTime,
-}: {
-  baseQuery: PinnedLogsBaseQuery;
-  canFetch: boolean;
-  dateParams: ReturnType<typeof normalizeDateTimeParams>;
-  ids: string[];
-  staleTime: number;
-}) {
-  const organization = useOrganization();
-
-  return useMemo(
-    () =>
-      apiOptions.as<EventsLogsResult>()('/organizations/$organizationIdOrSlug/events/', {
-        path:
-          canFetch && ids.length > 0
-            ? {organizationIdOrSlug: organization.slug}
-            : skipToken,
-        query: {
-          ...baseQuery,
-          ...dateParams,
-          query: `id:[${ids.join(',')}]`,
-          per_page: ids.length,
-        },
-        staleTime,
-      }),
-    [baseQuery, canFetch, dateParams, ids, organization.slug, staleTime]
+function useCachedPinnedLogRows(missingIds: string[]) {
+  const combine = useCallback(
+    (results: Array<{data: unknown}>) => {
+      const rows: OurLogsResponseItem[] = [];
+      const resolvedIds = new Set<string>();
+      results.forEach((result, index) => {
+        const row = result.data as OurLogsResponseItem | undefined;
+        if (row) {
+          rows.push(row);
+          resolvedIds.add(missingIds[index]!);
+        }
+      });
+      return {rows, resolvedIds};
+    },
+    [missingIds]
   );
+
+  return useQueries({
+    queries: missingIds.map(id => ({
+      queryKey: pinnedLogRowQueryKey(id),
+      queryFn: skipToken,
+      staleTime: Infinity,
+    })),
+    combine,
+  });
+}
+
+async function fetchAndCachePinnedLogs(
+  {
+    client,
+    signal,
+    meta,
+  }: Pick<QueryFunctionContext, 'signal' | 'meta'> & {
+    client: QueryClient;
+  },
+  {
+    ids,
+    organizationSlug,
+    baseQuery,
+    inRangeDateParams,
+  }: {
+    baseQuery: Record<string, unknown>;
+    ids: string[];
+    inRangeDateParams: Record<string, unknown>;
+    organizationSlug: string;
+  }
+): Promise<string[]> {
+  const idsToFetch = ids.filter(id => !client.getQueryData(pinnedLogRowQueryKey(id)));
+  if (idsToFetch.length === 0) {
+    return [];
+  }
+
+  const url = getApiUrl('/organizations/$organizationIdOrSlug/events/', {
+    path: {organizationIdOrSlug: organizationSlug},
+  });
+  const fetchByIds = (idsForFetch: string[], dateParams: Record<string, unknown>) =>
+    apiFetch<EventsLogsResult>({
+      client,
+      signal,
+      meta,
+      queryKey: [
+        url,
+        {
+          query: {
+            ...baseQuery,
+            ...dateParams,
+            query: `id:[${idsForFetch.join(',')}]`,
+            per_page: idsForFetch.length,
+          },
+        },
+        {infinite: false},
+      ],
+    });
+  const seedAndCollect = (result: EventsLogsResult) => {
+    const foundIds = new Set<string>();
+    for (const row of result.data) {
+      const id = row[OurLogKnownFieldKey.ID];
+      client.setQueryData(pinnedLogRowQueryKey(id), row);
+      foundIds.add(id);
+    }
+    return foundIds;
+  };
+
+  let foundInRange = new Set<string>();
+  try {
+    foundInRange = seedAndCollect((await fetchByIds(idsToFetch, inRangeDateParams)).json);
+  } catch {
+    // The selected range failed; let the wide window resolve everything instead.
+  }
+
+  const stillMissing = idsToFetch.filter(id => !foundInRange.has(id));
+  if (stillMissing.length === 0) {
+    return [];
+  }
+
+  const wide = await fetchByIds(stillMissing, {statsPeriod: WIDE_STATS_PERIOD});
+  const foundWide = seedAndCollect(wide.json);
+
+  if (wide.json.meta?.dataScanned === 'partial') {
+    return [];
+  }
+  return stillMissing.filter(id => !foundWide.has(id));
 }

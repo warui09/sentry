@@ -421,6 +421,45 @@ describe('usePinnedLogsQuery', () => {
     });
   });
 
+  it('keeps already-fetched rows for the remaining pins when a pin is removed', async () => {
+    const logA = LogFixture({
+      [OurLogKnownFieldKey.ID]: 'log-a',
+      [OurLogKnownFieldKey.PROJECT_ID]: String(project.id),
+      [OurLogKnownFieldKey.ORGANIZATION_ID]: Number(organization.id),
+    });
+    const logB = LogFixture({
+      [OurLogKnownFieldKey.ID]: 'log-b',
+      [OurLogKnownFieldKey.PROJECT_ID]: String(project.id),
+      [OurLogKnownFieldKey.ORGANIZATION_ID]: Number(organization.id),
+    });
+
+    MockApiClient.addMockResponse({
+      url: `/organizations/${organization.slug}/events/`,
+      method: 'GET',
+      body: {data: [logA, logB], meta: {fields: {id: 'string'}, units: {}}},
+    });
+
+    const {result, rerender} = renderHookWithProviders(
+      ({ids}: {ids: string[]}) =>
+        usePinnedLogsQuery({allRows: [], logsPinning: makeLogsPinning(ids)}),
+      {
+        organization,
+        additionalWrapper: AdditionalWrapper,
+        initialProps: {ids: ['log-a', 'log-b']},
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.fetchedRows).toHaveLength(2);
+    });
+
+    rerender({ids: ['log-b']});
+
+    expect(result.current.fetchedRows.map(row => row[OurLogKnownFieldKey.ID])).toEqual([
+      'log-b',
+    ]);
+  });
+
   it('does not fetch when pinned ids are already in allRows', () => {
     const existingLog = LogFixture({
       [OurLogKnownFieldKey.ID]: 'log-existing',
