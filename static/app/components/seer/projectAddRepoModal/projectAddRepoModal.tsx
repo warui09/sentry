@@ -1,4 +1,4 @@
-import {Fragment, useCallback} from 'react';
+import {Fragment, useCallback, useEffect} from 'react';
 import {useInfiniteQuery, useQuery, type InfiniteData} from '@tanstack/react-query';
 import {z} from 'zod';
 
@@ -6,7 +6,12 @@ import {Alert} from '@sentry/scraps/alert';
 import {ProjectAvatar} from '@sentry/scraps/avatar';
 import {Button} from '@sentry/scraps/button';
 import {CompactSelect} from '@sentry/scraps/compactSelect';
-import {defaultFormOptions, setFieldErrors, useScrapsForm} from '@sentry/scraps/form';
+import {
+  defaultFormOptions,
+  setFieldErrors,
+  useScrapsForm,
+  useStore,
+} from '@sentry/scraps/form';
 import {InputGroup} from '@sentry/scraps/input';
 import {Flex, Grid, Stack} from '@sentry/scraps/layout';
 import {ExternalLink} from '@sentry/scraps/link';
@@ -120,17 +125,8 @@ export function ProjectAddRepoModal({
       onDynamic: formSchema,
     },
     onSubmit: ({value, formApi}) => {
-      // GitLab repos can only hand off to Seer. The dropdown is disabled in that
-      // case, but stored state may still hold a coding agent (e.g. the org
-      // default), so coerce it here to guarantee a valid persisted value.
-      const hasGitlabRepo = value.repoEntries.some(entry =>
-        isGitlabRepoProvider(repositoriesById.get(entry.repoId)?.provider.id)
-      );
-      const coercedValue = hasGitlabRepo
-        ? {...value, agentOption: 'seer' as const}
-        : value;
       return saveMutation
-        .mutateAsync(formSchema.parse(coercedValue), {
+        .mutateAsync(formSchema.parse(value), {
           onSuccess: () => {
             addSuccessMessage(t('Project saved successfully'));
             closeModal();
@@ -159,6 +155,19 @@ export function ProjectAddRepoModal({
         });
     },
   });
+
+  // GitLab repos can only hand off to Seer. When one is attached, hard-reset the
+  // agent to Seer (rather than just overriding the display) so the user isn't
+  // left re-selecting an agent they can't use, and the saved value is correct.
+  const repoEntries = useStore(form.store, state => state.values.repoEntries);
+  const hasGitlabRepo = repoEntries.some(entry =>
+    isGitlabRepoProvider(repositoriesById.get(entry.repoId)?.provider.id)
+  );
+  useEffect(() => {
+    if (hasGitlabRepo && form.state.values.agentOption !== 'seer') {
+      form.setFieldValue('agentOption', 'seer');
+    }
+  }, [hasGitlabRepo, form]);
 
   return (
     <Fragment>
@@ -339,44 +348,33 @@ export function ProjectAddRepoModal({
 
             <Separator orientation="horizontal" />
 
-            <form.Subscribe selector={state => state.values.repoEntries}>
-              {repoEntries => {
-                const hasGitlabRepo = repoEntries.some(entry =>
-                  isGitlabRepoProvider(repositoriesById.get(entry.repoId)?.provider.id)
-                );
-                return (
-                  <Stack gap="md">
-                    {hasGitlabRepo && (
-                      <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>
-                    )}
-                    <form.AppField name="agentOption">
-                      {field => (
-                        <field.Layout.Row
-                          label={t('Handoff to Agent')}
-                          hintText={tct(
-                            'Seer will always triage and perform Root Cause Analysis for you, but after that you can hand the results to an agent to create a plan, code a fix, and draft a PR. [manage:Manage Coding Agents]',
-                            {
-                              manage: (
-                                <ExternalLink
-                                  href={`/settings/${organization.slug}/integrations/?category=coding+agent`}
-                                />
-                              ),
-                            }
-                          )}
-                        >
-                          <field.Select
-                            value={hasGitlabRepo ? 'seer' : field.state.value}
-                            onChange={field.handleChange}
-                            options={agentOptions}
-                            disabled={hasGitlabRepo}
+            <Stack gap="md">
+              {hasGitlabRepo && <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>}
+              <form.AppField name="agentOption">
+                {field => (
+                  <field.Layout.Row
+                    label={t('Handoff to Agent')}
+                    hintText={tct(
+                      'Seer will always triage and perform Root Cause Analysis for you, but after that you can hand the results to an agent to create a plan, code a fix, and draft a PR. [manage:Manage Coding Agents]',
+                      {
+                        manage: (
+                          <ExternalLink
+                            href={`/settings/${organization.slug}/integrations/?category=coding+agent`}
                           />
-                        </field.Layout.Row>
-                      )}
-                    </form.AppField>
-                  </Stack>
-                );
-              }}
-            </form.Subscribe>
+                        ),
+                      }
+                    )}
+                  >
+                    <field.Select
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                      options={agentOptions}
+                      disabled={hasGitlabRepo}
+                    />
+                  </field.Layout.Row>
+                )}
+              </form.AppField>
+            </Stack>
 
             <Separator orientation="horizontal" />
 

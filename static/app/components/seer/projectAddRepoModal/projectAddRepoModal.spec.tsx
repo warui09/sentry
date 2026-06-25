@@ -103,26 +103,59 @@ describe('ProjectAddRepoModal', () => {
     ).toBeInTheDocument();
   });
 
-  it('saves Seer as the agent when a GitLab repo is attached, even if the org default is a coding agent', async () => {
-    // Org default points at the Cursor integration, so the agent field would
-    // otherwise be saved as cursor. Attaching a GitLab repo must coerce it.
-    const orgWithDefault = OrganizationFixture({defaultCodingAgentIntegrationId: 123});
+  async function selectCodingAgent() {
+    await userEvent.click(screen.getByRole('textbox', {name: 'Handoff to Agent'}));
+    await userEvent.click(
+      await screen.findByRole('menuitemradio', {name: 'Cursor Cloud Agent'})
+    );
+  }
 
+  it('hard-resets a chosen coding agent to Seer and keeps it on removal', async () => {
+    openAddRepoModal();
+
+    // The user picks a coding agent.
+    await screen.findByRole('textbox', {name: 'Handoff to Agent'});
+    await selectCodingAgent();
+    expect(screen.getByText('Cursor Cloud Agent')).toBeInTheDocument();
+
+    // Adding a GitLab repo forces the selection to Seer and disables it.
+    await addRepository(/gitlab-repo/);
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', {name: 'Handoff to Agent'})).toBeDisabled()
+    );
+    expect(screen.getByText('Seer')).toBeInTheDocument();
+    expect(screen.queryByText('Cursor Cloud Agent')).not.toBeInTheDocument();
+
+    // Removing the repo re-enables the dropdown, but the choice stays Seer — the
+    // prior coding-agent selection is not restored (hard reset).
+    await userEvent.click(screen.getByRole('button', {name: 'Remove repository'}));
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', {name: 'Handoff to Agent'})).toBeEnabled()
+    );
+    expect(screen.getByText('Seer')).toBeInTheDocument();
+    expect(screen.queryByText('Cursor Cloud Agent')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/GitLab repositories can only hand off to Seer/)
+    ).not.toBeInTheDocument();
+  });
+
+  it('saves Seer as the agent when a GitLab repo is attached', async () => {
     const reposPut = MockApiClient.addMockResponse({
-      url: `/projects/${orgWithDefault.slug}/${project.slug}/seer/repos/`,
+      url: `/projects/${organization.slug}/${project.slug}/seer/repos/`,
       method: 'PUT',
     });
     const settingsPut = MockApiClient.addMockResponse({
-      url: `/projects/${orgWithDefault.slug}/${project.slug}/seer/settings/`,
+      url: `/projects/${organization.slug}/${project.slug}/seer/settings/`,
       method: 'PUT',
       body: {},
     });
 
-    openAddRepoModal(orgWithDefault);
+    openAddRepoModal();
 
-    // Pick the project.
+    // Pick the project and a coding agent that the GitLab repo must override.
     await userEvent.click(await screen.findByRole('button', {name: 'Select Project'}));
     await userEvent.click(await screen.findByRole('option', {name: /project-slug/}));
+    await selectCodingAgent();
 
     await addRepository(/gitlab-repo/);
     await waitFor(() =>
@@ -133,31 +166,13 @@ describe('ProjectAddRepoModal', () => {
 
     await waitFor(() => expect(reposPut).toHaveBeenCalled());
     expect(settingsPut).toHaveBeenCalledWith(
-      `/projects/${orgWithDefault.slug}/${project.slug}/seer/settings/`,
+      `/projects/${organization.slug}/${project.slug}/seer/settings/`,
       expect.objectContaining({data: expect.objectContaining({agent: 'seer'})})
     );
-    // The coercion must not carry the coding-agent integration id either.
+    // The reset must not carry the coding-agent integration id either.
     expect(settingsPut).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({data: expect.objectContaining({integrationId: '123'})})
     );
-  });
-
-  it('re-enables the agent dropdown when the GitLab repo is removed', async () => {
-    openAddRepoModal();
-
-    await addRepository(/gitlab-repo/);
-    await waitFor(() =>
-      expect(screen.getByRole('textbox', {name: 'Handoff to Agent'})).toBeDisabled()
-    );
-
-    await userEvent.click(screen.getByRole('button', {name: 'Remove repository'}));
-
-    await waitFor(() =>
-      expect(screen.getByRole('textbox', {name: 'Handoff to Agent'})).toBeEnabled()
-    );
-    expect(
-      screen.queryByText(/GitLab repositories can only hand off to Seer/)
-    ).not.toBeInTheDocument();
   });
 });
