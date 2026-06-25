@@ -183,6 +183,8 @@ async function fetchAndCachePinnedLogs(
     });
   };
 
+  // Step 1: Search in the parent selected range for pins that are not loaded yet.
+  // Start with this smaller range so we don't have to scan the org's full retention period.
   let foundInRange = new Set<string>();
   try {
     foundInRange = seedAndCollect(
@@ -198,6 +200,7 @@ async function fetchAndCachePinnedLogs(
     return [];
   }
 
+  // Step 2: Any IDs not found in the parent selected range escalate to a wide window.
   const wide = await fetchByIds(stillMissing, {statsPeriod: WIDE_STATS_PERIOD});
   const foundWide = seedAndCollect(client, wide.json);
 
