@@ -15,8 +15,8 @@ import type {DetailedProject} from 'sentry/types/project';
 import {useFetchAllPages} from 'sentry/utils/api/apiFetch';
 import {useUpdateProject} from 'sentry/utils/project/useUpdateProject';
 import {
-  GITLAB_HANDOFF_WARNING,
-  isGitlabRepoProvider,
+  isGithubRepoProvider,
+  NON_GITHUB_HANDOFF_WARNING,
   seerAgentIntegrationsSelectQueryOptions,
   knownAgentIntegrationsQueryOptions,
   coalesePreferredAgent,
@@ -72,15 +72,15 @@ export function AutofixAgent({canWrite, project}: Props) {
 
   const updateProject = useUpdateProject(project);
 
-  // GitLab repos can only hand off to Seer, so the agent dropdown is disabled
-  // when this project has one attached.
+  // Only GitHub repos can hand off to an external coding agent, so the agent
+  // dropdown is disabled when this project has any non-GitHub repo attached.
   const reposResult = useInfiniteQuery(
     getSeerProjectReposInfiniteQueryOptions({organization, project: {slug: project.slug}})
   );
   useFetchAllPages({result: reposResult});
-  const hasGitlabRepo = (reposResult.data?.pages ?? [])
+  const isOnlyGithubRepos = (reposResult.data?.pages ?? [])
     .flatMap(page => page.json)
-    .some(repo => isGitlabRepoProvider(repo.provider));
+    .every(repo => isGithubRepoProvider(repo.provider));
 
   const {data, isPending, isError, error} = useQuery(
     getSeerProjectSettingsQueryOptions({
@@ -132,7 +132,9 @@ export function AutofixAgent({canWrite, project}: Props) {
       >
         {field => (
           <Stack gap="md">
-            {hasGitlabRepo && <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>}
+            {!isOnlyGithubRepos && (
+              <Alert variant="warning">{NON_GITHUB_HANDOFF_WARNING}</Alert>
+            )}
             <field.Layout.Row
               label={t('Handoff to Agent')}
               hintText={tct(
@@ -150,11 +152,11 @@ export function AutofixAgent({canWrite, project}: Props) {
               )}
             >
               <field.Select
-                disabled={!canWrite || hasGitlabRepo}
+                disabled={!canWrite || !isOnlyGithubRepos}
                 multiple={false}
                 onChange={field.handleChange}
                 options={agentSelectOptions}
-                value={hasGitlabRepo ? 'seer' : field.state.value}
+                value={isOnlyGithubRepos ? field.state.value : 'seer'}
               />
             </field.Layout.Row>
           </Stack>

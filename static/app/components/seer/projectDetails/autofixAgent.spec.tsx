@@ -72,7 +72,7 @@ describe('AutofixAgent', () => {
     const select = await screen.findByRole('textbox', {name: 'Handoff to Agent'});
     expect(select).toBeEnabled();
     expect(
-      screen.queryByText(/GitLab repositories can only hand off to Seer/)
+      screen.queryByText(/Only Seer is supported for non-GitHub repositories/)
     ).not.toBeInTheDocument();
   });
 
@@ -89,7 +89,19 @@ describe('AutofixAgent', () => {
     const select = await screen.findByRole('textbox', {name: 'Handoff to Agent'});
     await waitFor(() => expect(select).toBeDisabled());
     expect(
-      screen.getByText(/GitLab repositories can only hand off to Seer/)
+      screen.getByText(/Only Seer is supported for non-GitHub repositories/)
+    ).toBeInTheDocument();
+  });
+
+  it('disables the agent dropdown for any non-GitHub provider', async () => {
+    mockEndpoints({repos: [seerRepo({provider: 'bitbucket'})]});
+
+    render(<AutofixAgent canWrite project={project} />, {organization});
+
+    const select = await screen.findByRole('textbox', {name: 'Handoff to Agent'});
+    await waitFor(() => expect(select).toBeDisabled());
+    expect(
+      screen.getByText(/Only Seer is supported for non-GitHub repositories/)
     ).toBeInTheDocument();
   });
 });

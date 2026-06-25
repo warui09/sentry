@@ -33,8 +33,8 @@ import {useProjectsById} from 'sentry/utils/project/useProjectsById';
 import {useCompactSelectRepositoryOptions} from 'sentry/utils/repositories/useCompactSelectRepositoryOptions';
 import {useRepositoriesById} from 'sentry/utils/repositories/useRepositoriesById';
 import {
-  GITLAB_HANDOFF_WARNING,
-  isGitlabRepoProvider,
+  isGithubRepoProvider,
+  NON_GITHUB_HANDOFF_WARNING,
   orgDefaultAgentQueryOptions,
   seerAgentIntegrationsSelectQueryOptions,
 } from 'sentry/utils/seer/preferredAgent';
@@ -156,18 +156,22 @@ export function ProjectAddRepoModal({
     },
   });
 
-  // GitLab repos can only hand off to Seer. When one is attached, hard-reset the
-  // agent to Seer (rather than just overriding the display) so the user isn't
-  // left re-selecting an agent they can't use, and the saved value is correct.
+  // Only GitHub repos can hand off to an external coding agent. When any other
+  // repo is attached, hard-reset the agent to Seer (rather than just overriding
+  // the display) so the user isn't left re-selecting an agent they can't use,
+  // and the saved value is correct. Unresolved repos (still loading) are ignored
+  // so the dropdown isn't disabled mid-fetch.
   const repoEntries = useStore(form.store, state => state.values.repoEntries);
-  const hasGitlabRepo = repoEntries.some(entry =>
-    isGitlabRepoProvider(repositoriesById.get(entry.repoId)?.provider.id)
-  );
+  const isOnlyGithubRepos = repoEntries.every(entry => {
+    const providerId = repositoriesById.get(entry.repoId)?.provider.id;
+    // Ignore unresolved repos (still loading) so we don't disable mid-fetch.
+    return providerId === undefined || isGithubRepoProvider(providerId);
+  });
   useEffect(() => {
-    if (hasGitlabRepo && form.state.values.agentOption !== 'seer') {
+    if (!isOnlyGithubRepos && form.state.values.agentOption !== 'seer') {
       form.setFieldValue('agentOption', 'seer');
     }
-  }, [hasGitlabRepo, form]);
+  }, [isOnlyGithubRepos, form]);
 
   return (
     <Fragment>
@@ -349,7 +353,9 @@ export function ProjectAddRepoModal({
             <Separator orientation="horizontal" />
 
             <Stack gap="md">
-              {hasGitlabRepo && <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>}
+              {!isOnlyGithubRepos && (
+                <Alert variant="warning">{NON_GITHUB_HANDOFF_WARNING}</Alert>
+              )}
               <form.AppField name="agentOption">
                 {field => (
                   <field.Layout.Row
@@ -369,7 +375,7 @@ export function ProjectAddRepoModal({
                       value={field.state.value}
                       onChange={field.handleChange}
                       options={agentOptions}
-                      disabled={hasGitlabRepo}
+                      disabled={!isOnlyGithubRepos}
                     />
                   </field.Layout.Row>
                 )}
