@@ -86,7 +86,7 @@ describe('ProjectAddRepoModal', () => {
 
     expect(screen.getByRole('textbox', {name: 'Handoff to Agent'})).toBeEnabled();
     expect(
-      screen.queryByText(/Only Seer is supported for non-GitHub repositories/)
+      screen.queryByText(/Non-GitHub repositories only support handing off to Seer/)
     ).not.toBeInTheDocument();
   });
 
@@ -99,7 +99,7 @@ describe('ProjectAddRepoModal', () => {
       expect(screen.getByRole('textbox', {name: 'Handoff to Agent'})).toBeDisabled()
     );
     expect(
-      screen.getByText(/Only Seer is supported for non-GitHub repositories/)
+      screen.getByText(/Non-GitHub repositories only support handing off to Seer/)
     ).toBeInTheDocument();
   });
 
@@ -135,7 +135,7 @@ describe('ProjectAddRepoModal', () => {
     expect(screen.getByText('Seer')).toBeInTheDocument();
     expect(screen.queryByText('Cursor Cloud Agent')).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/Only Seer is supported for non-GitHub repositories/)
+      screen.queryByText(/Non-GitHub repositories only support handing off to Seer/)
     ).not.toBeInTheDocument();
   });
 
