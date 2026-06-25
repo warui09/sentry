@@ -498,6 +498,48 @@ describe('usePinnedLogsQuery', () => {
     ]);
   });
 
+  it('refetches the pinned rows with the new fields when the visible columns change', async () => {
+    const pinnedLog = LogFixture({
+      [OurLogKnownFieldKey.ID]: 'log-cols',
+      [OurLogKnownFieldKey.PROJECT_ID]: String(project.id),
+      [OurLogKnownFieldKey.ORGANIZATION_ID]: Number(organization.id),
+    });
+
+    const eventsRequest = MockApiClient.addMockResponse({
+      url: `/organizations/${organization.slug}/events/`,
+      method: 'GET',
+      body: {data: [pinnedLog], meta: {fields: {id: 'string'}, units: {}}},
+    });
+
+    const logsPinning = makeLogsPinning(['log-cols']);
+
+    const {result, router} = renderHookWithProviders(
+      () => usePinnedLogsQuery({allRows: [], logsPinning}),
+      {
+        organization,
+        additionalWrapper: AdditionalWrapper,
+        initialRouterConfig: {location: {pathname: '/', query: {logsFields: 'message'}}},
+      }
+    );
+
+    const fieldsForCall = (call: unknown[]) =>
+      (call[1] as {query: {field: string[]}}).query.field;
+
+    await waitFor(() => {
+      expect(result.current.fetchedRows).toHaveLength(1);
+    });
+    expect(eventsRequest).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      router.navigate('/?logsFields=message&logsFields=my.custom.attr');
+    });
+
+    await waitFor(() => {
+      expect(eventsRequest).toHaveBeenCalledTimes(2);
+    });
+    expect(fieldsForCall(eventsRequest.mock.calls[1])).toContain('my.custom.attr');
+  });
+
   it('does not fetch when pinned ids are already in allRows', () => {
     const existingLog = LogFixture({
       [OurLogKnownFieldKey.ID]: 'log-existing',

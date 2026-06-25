@@ -32,14 +32,20 @@ const DRIVER_QUERY_KEY = 'pinned-logs-driver';
  */
 const WIDE_STATS_PERIOD = '9999d';
 
-function pinnedLogRowQueryKey(id: string) {
-  return ['pinned-log-row', id] as const;
+function pinnedLogRowQueryKey(id: string, fields: string[]) {
+  return ['pinned-log-row', id, fields] as const;
 }
 
 export function usePinnedLogsQuery({allRows, logsPinning}: PinnedLogsOptions) {
+  const userFields = useQueryParamsFields();
+  const fields = useMemo(
+    () => Array.from(new Set([...AlwaysPresentLogFields, ...userFields])),
+    [userFields]
+  );
+
   const missingIds = useMissingPinnedLogIds(allRows, logsPinning);
-  const isFetching = usePinnedLogFetcher(missingIds, logsPinning);
-  const {rows, resolvedIds} = useCachedPinnedLogRows(missingIds);
+  const isFetching = usePinnedLogFetcher(missingIds, fields, logsPinning);
+  const {rows, resolvedIds} = useCachedPinnedLogRows(missingIds, fields);
 
   return {
     fetchedRows: rows,
@@ -59,21 +65,24 @@ function useMissingPinnedLogIds(
   }, [logsPinning, allRows]);
 }
 
-function usePinnedLogFetcher(missingIds: string[], logsPinning: LogsPinning | undefined) {
+function usePinnedLogFetcher(
+  missingIds: string[],
+  fields: string[],
+  logsPinning: LogsPinning | undefined
+) {
   const organization = useOrganization();
   const {selection, isReady: pageFiltersReady} = usePageFilters();
-  const userFields = useQueryParamsFields();
 
   const baseQuery = useMemo(
     () => ({
       dataset: DiscoverDatasets.OURLOGS,
-      field: Array.from(new Set([...AlwaysPresentLogFields, ...userFields])),
+      field: fields,
       project: selection.projects,
       environment: selection.environments,
       sampling: SAMPLING_MODE.HIGH_ACCURACY,
       referrer: 'api.explore.logs-pinned',
     }),
-    [userFields, selection.projects, selection.environments]
+    [fields, selection.projects, selection.environments]
   );
   const inRangeDateParams = useMemo(
     () => normalizeDateTimeParams(selection.datetime),
@@ -86,6 +95,7 @@ function usePinnedLogFetcher(missingIds: string[], logsPinning: LogsPinning | un
       {
         organizationSlug: organization.slug,
         ids: [...missingIds].sort(),
+        fields,
         baseQuery,
         dateParams: inRangeDateParams,
       },
@@ -98,6 +108,7 @@ function usePinnedLogFetcher(missingIds: string[], logsPinning: LogsPinning | un
         organizationSlug: organization.slug,
         baseQuery,
         inRangeDateParams,
+        fields,
       }),
   });
 
@@ -112,7 +123,7 @@ function usePinnedLogFetcher(missingIds: string[], logsPinning: LogsPinning | un
   return driver.fetchStatus === 'fetching';
 }
 
-function useCachedPinnedLogRows(missingIds: string[]) {
+function useCachedPinnedLogRows(missingIds: string[], fields: string[]) {
   const combine = useCallback(
     (results: Array<{data: unknown}>) => {
       const rows: OurLogsResponseItem[] = [];
@@ -131,7 +142,7 @@ function useCachedPinnedLogRows(missingIds: string[]) {
 
   return useQueries({
     queries: missingIds.map(id => ({
-      queryKey: pinnedLogRowQueryKey(id),
+      queryKey: pinnedLogRowQueryKey(id, fields),
       queryFn: skipToken,
       staleTime: Infinity,
     })),
@@ -145,6 +156,7 @@ type FetchAndCacheContext = Pick<QueryFunctionContext, 'signal' | 'meta'> & {
 
 interface FetchAndCacheOptions {
   baseQuery: Record<string, unknown>;
+  fields: string[];
   ids: string[];
   inRangeDateParams: Record<string, unknown>;
   organizationSlug: string;
@@ -152,9 +164,11 @@ interface FetchAndCacheOptions {
 
 async function fetchAndCachePinnedLogs(
   {client, signal, meta}: FetchAndCacheContext,
-  {ids, organizationSlug, baseQuery, inRangeDateParams}: FetchAndCacheOptions
+  {ids, organizationSlug, baseQuery, inRangeDateParams, fields}: FetchAndCacheOptions
 ): Promise<string[]> {
-  const idsToFetch = ids.filter(id => !client.getQueryData(pinnedLogRowQueryKey(id)));
+  const idsToFetch = ids.filter(
+    id => !client.getQueryData(pinnedLogRowQueryKey(id, fields))
+  );
   if (idsToFetch.length === 0) {
     return [];
   }
@@ -189,7 +203,8 @@ async function fetchAndCachePinnedLogs(
   try {
     foundInRange = seedAndCollect(
       client,
-      (await fetchByIds(idsToFetch, inRangeDateParams)).json
+      (await fetchByIds(idsToFetch, inRangeDateParams)).json,
+      fields
     );
   } catch {
     // The selected range failed; let the wide window resolve everything instead.
@@ -202,7 +217,7 @@ async function fetchAndCachePinnedLogs(
 
   // Step 2: Any IDs not found in the parent selected range escalate to a wide window.
   const wide = await fetchByIds(stillMissing, {statsPeriod: WIDE_STATS_PERIOD});
-  const foundWide = seedAndCollect(client, wide.json);
+  const foundWide = seedAndCollect(client, wide.json, fields);
 
   // A partial scan didn't prove the unfound ids absent, so don't unpin them.
   if (wide.json.meta?.dataScanned === 'partial') {
@@ -212,12 +227,16 @@ async function fetchAndCachePinnedLogs(
   return stillMissing.filter(id => !foundWide.has(id));
 }
 
-const seedAndCollect = (client: QueryClient, result: EventsLogsResult) => {
+const seedAndCollect = (
+  client: QueryClient,
+  result: EventsLogsResult,
+  fields: string[]
+) => {
   const foundIds = new Set<string>();
 
   for (const row of result.data) {
     const id = row[OurLogKnownFieldKey.ID];
-    client.setQueryData(pinnedLogRowQueryKey(id), row);
+    client.setQueryData(pinnedLogRowQueryKey(id, fields), row);
     foundIds.add(id);
   }
 
