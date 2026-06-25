@@ -333,6 +333,44 @@ describe('usePinnedLogsQuery', () => {
     expect(logsPinning.removePinnedRows).not.toHaveBeenCalled();
   });
 
+  it('caches rows found by a partial wide scan without unpinning the stragglers', async () => {
+    const partialLog = LogFixture({
+      [OurLogKnownFieldKey.ID]: 'log-partial',
+      [OurLogKnownFieldKey.PROJECT_ID]: String(project.id),
+      [OurLogKnownFieldKey.ORGANIZATION_ID]: Number(organization.id),
+    });
+
+    MockApiClient.addMockResponse({
+      url: `/organizations/${organization.slug}/events/`,
+      method: 'GET',
+      body: {data: [], meta: {fields: {id: 'string'}, units: {}}},
+      match: [MockApiClient.matchQuery({statsPeriod: '14d'})],
+    });
+    MockApiClient.addMockResponse({
+      url: `/organizations/${organization.slug}/events/`,
+      method: 'GET',
+      body: {
+        data: [partialLog],
+        meta: {fields: {id: 'string'}, units: {}, dataScanned: 'partial'},
+      },
+      match: [MockApiClient.matchQuery({statsPeriod: '9999d'})],
+    });
+
+    const logsPinning = makeLogsPinning(['log-partial']);
+
+    const {result} = renderHookWithProviders(
+      () => usePinnedLogsQuery({allRows: [], logsPinning}),
+      {organization, additionalWrapper: AdditionalWrapper}
+    );
+
+    await waitFor(() => {
+      expect(result.current.fetchedRows).toHaveLength(1);
+    });
+
+    expect(result.current.fetchedRows[0]?.[OurLogKnownFieldKey.ID]).toBe('log-partial');
+    expect(logsPinning.removePinnedRows).not.toHaveBeenCalled();
+  });
+
   it('calls removePinnedRows with every id not found in the API response', async () => {
     const foundLog = LogFixture({
       [OurLogKnownFieldKey.ID]: 'log-found',

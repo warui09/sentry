@@ -139,36 +139,31 @@ function useCachedPinnedLogRows(missingIds: string[]) {
   });
 }
 
+type FetchAndCacheContext = Pick<QueryFunctionContext, 'signal' | 'meta'> & {
+  client: QueryClient;
+};
+
+interface FetchAndCacheOptions {
+  baseQuery: Record<string, unknown>;
+  ids: string[];
+  inRangeDateParams: Record<string, unknown>;
+  organizationSlug: string;
+}
+
 async function fetchAndCachePinnedLogs(
-  {
-    client,
-    signal,
-    meta,
-  }: Pick<QueryFunctionContext, 'signal' | 'meta'> & {
-    client: QueryClient;
-  },
-  {
-    ids,
-    organizationSlug,
-    baseQuery,
-    inRangeDateParams,
-  }: {
-    baseQuery: Record<string, unknown>;
-    ids: string[];
-    inRangeDateParams: Record<string, unknown>;
-    organizationSlug: string;
-  }
+  {client, signal, meta}: FetchAndCacheContext,
+  {ids, organizationSlug, baseQuery, inRangeDateParams}: FetchAndCacheOptions
 ): Promise<string[]> {
   const idsToFetch = ids.filter(id => !client.getQueryData(pinnedLogRowQueryKey(id)));
   if (idsToFetch.length === 0) {
     return [];
   }
 
-  const url = getApiUrl('/organizations/$organizationIdOrSlug/events/', {
-    path: {organizationIdOrSlug: organizationSlug},
-  });
-  const fetchByIds = (idsForFetch: string[], dateParams: Record<string, unknown>) =>
-    apiFetch<EventsLogsResult>({
+  const fetchByIds = (idsForFetch: string[], dateParams: Record<string, unknown>) => {
+    const url = getApiUrl('/organizations/$organizationIdOrSlug/events/', {
+      path: {organizationIdOrSlug: organizationSlug},
+    });
+    return apiFetch<EventsLogsResult>({
       client,
       signal,
       meta,
@@ -185,19 +180,14 @@ async function fetchAndCachePinnedLogs(
         {infinite: false},
       ],
     });
-  const seedAndCollect = (result: EventsLogsResult) => {
-    const foundIds = new Set<string>();
-    for (const row of result.data) {
-      const id = row[OurLogKnownFieldKey.ID];
-      client.setQueryData(pinnedLogRowQueryKey(id), row);
-      foundIds.add(id);
-    }
-    return foundIds;
   };
 
   let foundInRange = new Set<string>();
   try {
-    foundInRange = seedAndCollect((await fetchByIds(idsToFetch, inRangeDateParams)).json);
+    foundInRange = seedAndCollect(
+      client,
+      (await fetchByIds(idsToFetch, inRangeDateParams)).json
+    );
   } catch {
     // The selected range failed; let the wide window resolve everything instead.
   }
@@ -208,10 +198,24 @@ async function fetchAndCachePinnedLogs(
   }
 
   const wide = await fetchByIds(stillMissing, {statsPeriod: WIDE_STATS_PERIOD});
-  const foundWide = seedAndCollect(wide.json);
+  const foundWide = seedAndCollect(client, wide.json);
 
+  // A partial scan didn't prove the unfound ids absent, so don't unpin them.
   if (wide.json.meta?.dataScanned === 'partial') {
     return [];
   }
+
   return stillMissing.filter(id => !foundWide.has(id));
 }
+
+const seedAndCollect = (client: QueryClient, result: EventsLogsResult) => {
+  const foundIds = new Set<string>();
+
+  for (const row of result.data) {
+    const id = row[OurLogKnownFieldKey.ID];
+    client.setQueryData(pinnedLogRowQueryKey(id), row);
+    foundIds.add(id);
+  }
+
+  return foundIds;
+};
