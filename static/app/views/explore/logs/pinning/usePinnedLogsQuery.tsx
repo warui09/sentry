@@ -159,10 +159,11 @@ async function fetchAndCachePinnedLogs(
     return [];
   }
 
+  const url = getApiUrl('/organizations/$organizationIdOrSlug/events/', {
+    path: {organizationIdOrSlug: organizationSlug},
+  });
+
   const fetchByIds = (idsForFetch: string[], dateParams: Record<string, unknown>) => {
-    const url = getApiUrl('/organizations/$organizationIdOrSlug/events/', {
-      path: {organizationIdOrSlug: organizationSlug},
-    });
     return apiFetch<EventsLogsResult>({
       client,
       signal,
