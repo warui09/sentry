@@ -131,24 +131,24 @@ export function AutofixAgent({canWrite, project}: Props) {
         })}
       >
         {field => (
-          <field.Layout.Row
-            label={t('Handoff to Agent')}
-            hintText={tct(
-              'Select your preferred agent to create a plan, and code up an issue fix. Seer Agent will always be used for the Root Cause Analysis step. [manageLink:Manage Coding Agents].',
-              {
-                manageLink: (
-                  <Link
-                    to={{
-                      pathname: `/settings/${organization.slug}/integrations/`,
-                      query: {category: 'coding agent'},
-                    }}
-                  />
-                ),
-              }
-            )}
-          >
-            <Stack gap="sm">
-              {hasGitlabRepo && <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>}
+          <Stack gap="md">
+            {hasGitlabRepo && <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>}
+            <field.Layout.Row
+              label={t('Handoff to Agent')}
+              hintText={tct(
+                'Select your preferred agent to create a plan, and code up an issue fix. Seer Agent will always be used for the Root Cause Analysis step. [manageLink:Manage Coding Agents].',
+                {
+                  manageLink: (
+                    <Link
+                      to={{
+                        pathname: `/settings/${organization.slug}/integrations/`,
+                        query: {category: 'coding agent'},
+                      }}
+                    />
+                  ),
+                }
+              )}
+            >
               <field.Select
                 disabled={!canWrite || hasGitlabRepo}
                 multiple={false}
@@ -156,8 +156,8 @@ export function AutofixAgent({canWrite, project}: Props) {
                 options={agentSelectOptions}
                 value={hasGitlabRepo ? 'seer' : field.state.value}
               />
-            </Stack>
-          </field.Layout.Row>
+            </field.Layout.Row>
+          </Stack>
         )}
       </AutoSaveForm>
 

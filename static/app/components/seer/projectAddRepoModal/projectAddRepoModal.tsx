@@ -345,35 +345,35 @@ export function ProjectAddRepoModal({
                   isGitlabRepoProvider(repositoriesById.get(entry.repoId)?.provider.id)
                 );
                 return (
-                  <form.AppField name="agentOption">
-                    {field => (
-                      <field.Layout.Row
-                        label={t('Handoff to Agent')}
-                        hintText={tct(
-                          'Seer will always triage and perform Root Cause Analysis for you, but after that you can hand the results to an agent to create a plan, code a fix, and draft a PR. [manage:Manage Coding Agents]',
-                          {
-                            manage: (
-                              <ExternalLink
-                                href={`/settings/${organization.slug}/integrations/?category=coding+agent`}
-                              />
-                            ),
-                          }
-                        )}
-                      >
-                        <Stack gap="sm">
-                          {hasGitlabRepo && (
-                            <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>
+                  <Stack gap="md">
+                    {hasGitlabRepo && (
+                      <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>
+                    )}
+                    <form.AppField name="agentOption">
+                      {field => (
+                        <field.Layout.Row
+                          label={t('Handoff to Agent')}
+                          hintText={tct(
+                            'Seer will always triage and perform Root Cause Analysis for you, but after that you can hand the results to an agent to create a plan, code a fix, and draft a PR. [manage:Manage Coding Agents]',
+                            {
+                              manage: (
+                                <ExternalLink
+                                  href={`/settings/${organization.slug}/integrations/?category=coding+agent`}
+                                />
+                              ),
+                            }
                           )}
+                        >
                           <field.Select
                             value={hasGitlabRepo ? 'seer' : field.state.value}
                             onChange={field.handleChange}
                             options={agentOptions}
                             disabled={hasGitlabRepo}
                           />
-                        </Stack>
-                      </field.Layout.Row>
-                    )}
-                  </form.AppField>
+                        </field.Layout.Row>
+                      )}
+                    </form.AppField>
+                  </Stack>
                 );
               }}
             </form.Subscribe>
