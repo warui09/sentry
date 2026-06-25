@@ -1,9 +1,10 @@
-import {useQuery, useQueryClient} from '@tanstack/react-query';
+import {useInfiniteQuery, useQuery, useQueryClient} from '@tanstack/react-query';
 import {z} from 'zod';
 
+import {Alert} from '@sentry/scraps/alert';
 import {FeatureBadge} from '@sentry/scraps/badge';
 import {AutoSaveForm, FieldGroup} from '@sentry/scraps/form';
-import {Flex} from '@sentry/scraps/layout';
+import {Flex, Stack} from '@sentry/scraps/layout';
 import {ExternalLink, Link} from '@sentry/scraps/link';
 import {Text} from '@sentry/scraps/text';
 
@@ -11,12 +12,16 @@ import Feature from 'sentry/components/acl/feature';
 import {LoadingIndicator} from 'sentry/components/loadingIndicator';
 import {t, tct} from 'sentry/locale';
 import type {DetailedProject} from 'sentry/types/project';
+import {useFetchAllPages} from 'sentry/utils/api/apiFetch';
 import {useUpdateProject} from 'sentry/utils/project/useUpdateProject';
 import {
+  GITLAB_HANDOFF_WARNING,
+  isGitlabRepoProvider,
   seerAgentIntegrationsSelectQueryOptions,
   knownAgentIntegrationsQueryOptions,
   coalesePreferredAgent,
 } from 'sentry/utils/seer/preferredAgent';
+import {getSeerProjectReposInfiniteQueryOptions} from 'sentry/utils/seer/seerProjectRepos';
 import {
   getMutateSeerProjectSettingsOptions,
   getSeerProjectSettingsQueryOptions,
@@ -66,6 +71,16 @@ export function AutofixAgent({canWrite, project}: Props) {
   const stoppingPointOptions = useStoppingPointSelectOptions();
 
   const updateProject = useUpdateProject(project);
+
+  // GitLab repos can only hand off to Seer, so the agent dropdown is disabled
+  // when this project has one attached.
+  const reposResult = useInfiniteQuery(
+    getSeerProjectReposInfiniteQueryOptions({organization, project: {slug: project.slug}})
+  );
+  useFetchAllPages({result: reposResult});
+  const hasGitlabRepo = (reposResult.data?.pages ?? [])
+    .flatMap(page => page.json)
+    .some(repo => isGitlabRepoProvider(repo.provider));
 
   const {data, isPending, isError, error} = useQuery(
     getSeerProjectSettingsQueryOptions({
@@ -132,13 +147,16 @@ export function AutofixAgent({canWrite, project}: Props) {
               }
             )}
           >
-            <field.Select
-              disabled={!canWrite}
-              multiple={false}
-              onChange={field.handleChange}
-              options={agentSelectOptions}
-              value={field.state.value}
-            />
+            <Stack gap="sm">
+              {hasGitlabRepo && <Alert variant="warning">{GITLAB_HANDOFF_WARNING}</Alert>}
+              <field.Select
+                disabled={!canWrite || hasGitlabRepo}
+                multiple={false}
+                onChange={field.handleChange}
+                options={agentSelectOptions}
+                value={hasGitlabRepo ? 'seer' : field.state.value}
+              />
+            </Stack>
           </field.Layout.Row>
         )}
       </AutoSaveForm>

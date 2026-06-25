@@ -27,6 +27,18 @@ export function coalesePreferredAgent(
   return `${agent}::${integrationId ?? ''}` as const;
 }
 
+// GitLab repositories can only hand off to Seer; external coding agents are not
+// supported. Provider identity comes through in a few shapes: the repository
+// `provider.id` (`'gitlab'` or `'integrations:gitlab'`) and the lowercased
+// provider name persisted on Seer repos (`'gitlab'`).
+export function isGitlabRepoProvider(provider: string | undefined | null): boolean {
+  return provider === 'gitlab' || provider === 'integrations:gitlab';
+}
+
+export const GITLAB_HANDOFF_WARNING = t(
+  'GitLab repositories can only hand off to Seer. Coding agents are not yet supported for GitLab.'
+);
+
 export function isPreferredAgentProvider(
   provider: string | undefined
 ): provider is PreferredAgentProvider {
