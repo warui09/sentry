@@ -14,7 +14,7 @@ from rest_framework.request import Request
 from rest_framework.views import APIView
 
 from sentry.api.base import Endpoint
-from sentry.api.exceptions import ResourceDoesNotExist
+from sentry.api.exceptions import InsufficientScope, ResourceDoesNotExist
 from sentry.api.helpers.environments import get_environments
 from sentry.api.helpers.projects import (
     ParsedProjectIdOrSlugParams,
@@ -123,15 +123,18 @@ class OrganizationPermission(DemoSafePermission):
         return any(request.access.has_scope(s) for s in allowed_scopes)
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        allowed = super().has_permission(request, view)
-        if not allowed and agent_token.get_agent_claims(request) is not None:
-            # An agent token is read-only by default, so a write fails the view-level
-            # scope check here (before object permissions). If the acting user could grant
-            # the missing scope, turn the bare 403 into a structured approval challenge.
-            # No-op for all non-agent traffic.
+        try:
+            return super().has_permission(request, view)
+        except InsufficientScope:
+            # The shared token-scope gate denied an under-scoped token. If this is the Seer
+            # agent and the acting user could grant the missing scope, upgrade the
+            # insufficient_scope 403 into a structured approval challenge; otherwise let the
+            # standard denial stand. No-op for all non-agent traffic.
+            if agent_token.get_agent_claims(request) is None:
+                raise
             required_scopes = set(self.scope_map.get(request.method or "", []))
             agent_token.maybe_challenge(request, required_scopes)
-        return allowed
+            raise
 
     def is_member_disabled_from_limit(
         self,

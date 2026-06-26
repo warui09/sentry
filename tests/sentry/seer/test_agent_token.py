@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from sentry.api.authentication import AgentTokenAuthentication
 from sentry.api.bases.organization import OrganizationPermission
+from sentry.api.exceptions import InsufficientScope
 from sentry.seer import agent_token
 from sentry.seer.agent_token import AgentWritePermissionRequired
 from sentry.seer.models.agent_write_grant import SeerAgentWriteGrant
@@ -140,9 +141,11 @@ class AgentTokenAuthAndGateTest(TestCase):
         assert not SeerAgentWriteGrant.objects.filter(organization_id=self.org.id).exists()
 
     def test_no_challenge_when_role_lacks_scope(self) -> None:
-        # A plain member has no org:write to grant, so an ordinary denial follows.
+        # A plain member has no org:write to grant, so no approval challenge is offered —
+        # the standard insufficient_scope denial stands (not AgentWritePermissionRequired).
         request = self._agent_request(self.member, ["org:read"], method="PUT")
-        assert self._has_permission(request) is False
+        with pytest.raises(InsufficientScope):
+            self._has_permission(request)
         assert not SeerAgentWriteGrant.objects.filter(user_id=self.member.id).exists()
 
     def test_challenge_token_roundtrip_rejects_wrong_audience(self) -> None:
