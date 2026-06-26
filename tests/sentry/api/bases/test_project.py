@@ -3,6 +3,7 @@ from django.test import RequestFactory
 from rest_framework.views import APIView
 
 from sentry.api.bases.project import ProjectAndStaffPermission, ProjectEndpoint, ProjectPermission
+from sentry.api.exceptions import InsufficientScope
 from sentry.auth.access import from_request
 from sentry.models.apitoken import ApiToken
 from sentry.models.project import Project
@@ -33,9 +34,12 @@ class ProjectPermissionBase(TestCase):
             user=user, auth=auth, method=method, is_superuser=is_superuser, is_staff=is_staff
         )
         drf_request = drf_request_from_request(request)
-        return perm.has_permission(drf_request, APIView()) and perm.has_object_permission(
-            drf_request, APIView(), obj
-        )
+        try:
+            return perm.has_permission(drf_request, APIView()) and perm.has_object_permission(
+                drf_request, APIView(), obj
+            )
+        except InsufficientScope:
+            return False
 
 
 class ProjectEndpointViewerContextTest(TestCase):

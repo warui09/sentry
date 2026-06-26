@@ -8,6 +8,7 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthentic
 from rest_framework.request import Request
 
 from sentry.api.exceptions import (
+    InsufficientScope,
     MemberDisabledOverLimit,
     SsoRequired,
     SuperuserRequired,
@@ -121,7 +122,12 @@ class ScopedPermission(BasePermission):
         assert request.method is not None
         allowed_scopes = set(self.scope_map.get(request.method, []))
         current_scopes = request.auth.get_scopes()
-        return any(s in allowed_scopes for s in current_scopes)
+        if any(s in allowed_scopes for s in current_scopes):
+            return True
+        # Token-authorized (request.auth is set) but under-scoped: advertise the required
+        # scopes per RFC 6750 insufficient_scope so the caller knows what it is missing
+        # instead of getting a bare 403.
+        raise InsufficientScope(allowed_scopes)
 
     def has_object_permission(self, request: Request, view: APIView, obj: Any) -> bool:
         return False

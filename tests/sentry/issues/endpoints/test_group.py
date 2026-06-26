@@ -2,6 +2,7 @@ from typing import ContextManager
 
 from rest_framework.views import APIView
 
+from sentry.api.exceptions import InsufficientScope
 from sentry.auth.access import from_request
 from sentry.issues.endpoints.bases.group import GroupAiEndpoint, GroupAiPermission
 from sentry.models.apitoken import ApiToken
@@ -56,9 +57,12 @@ class GroupAiPermissionTest(TestCase):
     ) -> bool:
         request = self.make_request(user=user, auth=auth, method=method, is_superuser=is_superuser)
         drf_request = drf_request_from_request(request)
-        return self.permission.has_permission(
-            drf_request, APIView()
-        ) and self.permission.has_object_permission(drf_request, APIView(), obj)
+        try:
+            return self.permission.has_permission(
+                drf_request, APIView()
+            ) and self.permission.has_object_permission(drf_request, APIView(), obj)
+        except InsufficientScope:
+            return False
 
     def test_demo_user_safe_methods(self) -> None:
         with self._demo_mode_enabled():

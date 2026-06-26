@@ -20,6 +20,7 @@ from sentry.api.bases.organization import (
     OrganizationReleasesBaseEndpoint,
 )
 from sentry.api.exceptions import (
+    InsufficientScope,
     MemberDisabledOverLimit,
     ResourceDoesNotExist,
     SsoRequired,
@@ -96,9 +97,12 @@ class PermissionBaseTestCase(TestCase):
             user=user, auth=auth, method=method, is_superuser=is_superuser, is_staff=is_staff
         )
         drf_request = drf_request_from_request(request)
-        result_with_obj = perm.has_permission(
-            drf_request, APIView()
-        ) and perm.has_object_permission(drf_request, APIView(), obj)
+        try:
+            result_with_obj = perm.has_permission(
+                drf_request, APIView()
+            ) and perm.has_object_permission(drf_request, APIView(), obj)
+        except InsufficientScope:
+            result_with_obj = False
         if result_with_org_rpc is not None:
             return bool(result_with_obj and result_with_org_rpc and result_with_org_context_rpc)
         return result_with_obj
