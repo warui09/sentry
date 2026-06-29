@@ -295,6 +295,16 @@ def _get_kwargs(payload: Mapping[str, Any]) -> Mapping[str, Any]:
                             "span_id": None,
                         },
                     )
+                    set_path(
+                        event_data,
+                        "_meta",
+                        "contexts",
+                        "trace",
+                        "trace_id",
+                        "",
+                        "err",
+                        value=["trace_id.missing"],
+                    )
 
                 try:
                     jsonschema.validate(event_data, EVENT_PAYLOAD_SCHEMA)
